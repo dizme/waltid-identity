@@ -8,9 +8,13 @@
     reverse_proxy http://wallet-api:{$WALLET_BACKEND_PORT}
 }
 
-# Issuer API
+# Issuer API — wallet well-known: /.well-known/.../<ver> → issuer /{ver}/.well-known/...
 :{$ISSUER_API_PORT} {
-    reverse_proxy http://issuer-api:{$ISSUER_API_PORT}
+	@cred path_regexp credential ^/\.well-known/openid-credential-issuer/([^/]+)$
+	rewrite @cred /{http.regexp.credential.1}/.well-known/openid-credential-issuer
+	@auth path_regexp auth ^/\.well-known/oauth-authorization-server/([^/]+)$
+	rewrite @auth /{http.regexp.auth.1}/.well-known/oauth-authorization-server
+	reverse_proxy http://issuer-api:{$ISSUER_API_PORT}
 }
 
 # Verifier API

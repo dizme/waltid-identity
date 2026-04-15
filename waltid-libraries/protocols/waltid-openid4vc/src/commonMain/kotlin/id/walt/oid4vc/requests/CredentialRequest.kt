@@ -9,10 +9,28 @@ import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 private val json = Json {
     ignoreUnknownKeys = true
+}
+
+private fun normalizeProofsField(jsonObject: JsonObject): JsonObject {
+    if ("proof" in jsonObject || "proofs" !in jsonObject) {
+        return jsonObject
+    }
+    val proofs = jsonObject["proofs"]?.jsonObject ?: return jsonObject
+    val jwt = proofs["jwt"]?.jsonArray?.firstOrNull()?.jsonPrimitive?.contentOrNull ?: return jsonObject
+    val normalizedProof = buildJsonObject {
+        put("proof_type", JsonPrimitive(ProofType.jwt.name))
+        put("jwt", JsonPrimitive(jwt))
+    }
+    return JsonObject(jsonObject + ("proof" to normalizedProof))
 }
 
 @OptIn(ExperimentalSerializationApi::class)
@@ -34,7 +52,7 @@ data class CredentialRequest(
 
     companion object : JsonDataObjectFactory<CredentialRequest>() {
         override fun fromJSON(jsonObject: JsonObject): CredentialRequest =
-            json.decodeFromJsonElement(CredentialRequestSerializer, jsonObject)
+            json.decodeFromJsonElement(CredentialRequestSerializer, normalizeProofsField(jsonObject))
 
         fun forAuthorizationDetails(authorizationDetails: AuthorizationDetails, proof: ProofOfPossession?) =
             CredentialRequest(

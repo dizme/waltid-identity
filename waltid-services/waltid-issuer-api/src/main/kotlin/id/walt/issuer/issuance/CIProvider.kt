@@ -58,6 +58,7 @@ import kotlinx.serialization.decodeFromByteArray
 import kotlinx.serialization.json.*
 import org.cose.java.AlgorithmID
 import org.cose.java.OneKey
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
@@ -74,6 +75,31 @@ open class CIProvider(
         credentialConfigurationsSupported = ConfigManager.getConfig<CredentialTypeConfig>().parse()
     )
 ) {
+
+    private val issuedProofNonces = ConcurrentHashMap<String, kotlin.time.Instant>()
+
+    fun issueProofOfPossessionNonce(): Pair<String, Duration> {
+        val nonce = randomUUIDString()
+        val ttl = 5.minutes
+        issuedProofNonces[nonce] = Clock.System.now().plus(ttl)
+        return Pair(nonce, ttl)
+    }
+
+    private fun consumeIssuedProofNonce(nonce: String): Boolean {
+        val exp = issuedProofNonces.remove(nonce) ?: return false
+        return Clock.System.now() <= exp
+    }
+
+    private fun normalizeSerializedIssuerKey(issuerKey: JsonObject): JsonObject {
+        if (issuerKey["type"] != null) return issuerKey
+        if (issuerKey.containsKey("kty") || issuerKey.containsKey("x")) {
+            return buildJsonObject {
+                put("type", JsonPrimitive("jwk"))
+                put("jwk", issuerKey)
+            }
+        }
+        return issuerKey
+    }
 
     val metadata
         get() = (OpenID4VCI.createDefaultProviderMetadata(
@@ -321,7 +347,7 @@ open class CIProvider(
             val vc = request.credentialData
                 ?: throw MissingFieldException(listOf("credentialData"), "credentialData")
 
-            val resolvedIssuerKey = KeyManager.resolveSerializedKey(request.issuerKey)
+            val resolvedIssuerKey = KeyManager.resolveSerializedKey(normalizeSerializedIssuerKey(request.issuerKey))
 
             val x5c = request.x5Chain?.map {
                 X509CertUtils.parse(it).encoded.encodeToBase64()
@@ -329,7 +355,7 @@ open class CIProvider(
 
             request.run {
                 when (credentialFormat) {
-                    CredentialFormat.sd_jwt_vc -> OpenID4VCI.generateSdJwtVC(
+                    CredentialFormat.sd_jwt_vc, CredentialFormat.sd_jwt_dc -> OpenID4VCI.generateSdJwtVC(
                         credentialRequest = credentialRequest,
                         credentialData = vc,
                         issuerId = issuerDid ?: baseUrl,
@@ -436,7 +462,15 @@ open class CIProvider(
 
         val issuerSignedItems = request.mdocData ?: throw MissingFieldException(listOf("mdocData"), "mdocData")
 
-        val resolvedIssuerKey = KeyManager.resolveSerializedKey(request.issuerKey)
+        if (request.x5Chain.isNullOrEmpty()) {
+            throw CredentialError(
+                credentialRequest = credentialRequest,
+                errorCode = CredentialErrorCode.invalid_request,
+                message = "mDoc issuance requires a non-empty x5Chain (PEM certificates) so issuerAuth COSE includes x5c"
+            )
+        }
+
+        val resolvedIssuerKey = KeyManager.resolveSerializedKey(normalizeSerializedIssuerKey(request.issuerKey))
 
         val issuerKey = JWK.parse(resolvedIssuerKey.exportJWK()).toECKey()
 
@@ -468,7 +502,7 @@ open class CIProvider(
                     addItemToSign(
                         nameSpace = namespace.key,
                         elementIdentifier = property.key,
-                        elementValue = property.value.toDataElement(),
+                        elementValue = property.value.toDataElement(property.key),
                     )
                 }
             }
@@ -549,7 +583,7 @@ open class CIProvider(
         }
         authSessions.getAll().forEach { session ->
             session.issuanceRequests.forEach {
-                val resolvedIssuerKey = KeyManager.resolveSerializedKey(it.issuerKey)
+                val resolvedIssuerKey = KeyManager.resolveSerializedKey(normalizeSerializedIssuerKey(it.issuerKey))
                 jwksList = buildJsonObject {
                     put("keys", buildJsonArray {
                         val jwkWithKid = buildJsonObject {
@@ -602,7 +636,7 @@ open class CIProvider(
                         (types == credentialRequest.credentialDefinition?.type) || (types == credentialRequest.types)
                     }
 
-                    CredentialFormat.sd_jwt_vc -> {
+                    CredentialFormat.sd_jwt_vc, CredentialFormat.sd_jwt_dc -> {
                         val vct = metadata.getVctByCredentialConfigurationId(credentialConfigurationId)
                         vct == credentialRequest.vct
                     }
@@ -642,9 +676,8 @@ open class CIProvider(
                             ((authorizationDetails.credentialDefinition?.type != null && credentialSupported.credentialDefinition?.type?.containsAll(
                                 authorizationDetails.credentialDefinition!!.type!!
                             ) == true) ||
-                                    (authorizationDetails.docType != null && credentialSupported.docType == authorizationDetails.docType)
-                                    )
-                    // TODO: check other supported credential parameters
+                                    (authorizationDetails.docType != null && credentialSupported.docType == authorizationDetails.docType) ||
+                                    (authorizationDetails.vct != null && credentialSupported.vct == authorizationDetails.vct))
                 }
     }
 
@@ -784,16 +817,28 @@ open class CIProvider(
         runBlocking {
             // access_token should be validated on API level and issuance session extracted
             // Validate credential request (proof of possession, etc.)
-            val nonce = session.cNonce
+            val nonceFromProof = credentialRequest.proof?.let { OpenID4VCI.getNonceFromProof(it) }
                 ?: throw CredentialError(
                     credentialRequest = credentialRequest,
                     errorCode = CredentialErrorCode.invalid_or_missing_proof,
-                    message = "No cNonce found on current issuance session"
+                    message = "No nonce found in proof"
                 )
+
+            val sessionNonce = session.cNonce
+            val validSessionNonce = sessionNonce != null && sessionNonce == nonceFromProof
+            val validIssuedNonce = consumeIssuedProofNonce(nonceFromProof)
+
+            if (!validSessionNonce && !validIssuedNonce) {
+                throw CredentialError(
+                    credentialRequest = credentialRequest,
+                    errorCode = CredentialErrorCode.invalid_or_missing_proof,
+                    message = "Proof nonce does not match session or a valid issuer-issued nonce"
+                )
+            }
 
             val validationResult = OpenID4VCI.validateCredentialRequest(
                 credentialRequest = credentialRequest,
-                nonce = nonce,
+                nonce = nonceFromProof,
                 openIDProviderMetadata = metadata
             )
 

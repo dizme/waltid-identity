@@ -4,6 +4,8 @@ import id.walt.commons.config.ConfigManager
 import id.walt.commons.config.WaltConfig
 import id.walt.mdoc.doc.MDocTypes
 import id.walt.oid4vc.OpenID4VCIVersion
+import id.walt.oid4vc.data.ProofType
+import id.walt.oid4vc.data.ProofTypeMetadata
 import id.walt.oid4vc.data.*
 import id.walt.sdjwt.metadata.type.SdJwtVcTypeMetadataDraft04
 import kotlinx.serialization.Serializable
@@ -209,21 +211,25 @@ data class CredentialTypeConfig(
                     val type = element.jsonArray.map { it.jsonPrimitive.content }
 
                     CredentialFormat.entries.minus(CredentialFormat.mso_mdoc).associate { format ->
+                        val isSdJwt = format == CredentialFormat.sd_jwt_vc || format == CredentialFormat.sd_jwt_dc
                         "${entry.key}_${format.value}" to CredentialSupported(
                             format = format,
-                            cryptographicBindingMethodsSupported = if (format == CredentialFormat.sd_jwt_vc) setOf("jwk") else setOf(
+                            cryptographicBindingMethodsSupported = if (isSdJwt) setOf("jwk") else setOf(
                                 "did"
                             ),
+                            proofTypesSupported = if (isSdJwt) mapOf(
+                                ProofType.jwt to ProofTypeMetadata(setOf("ES256"))
+                            ) else null,
                             credentialSigningAlgValuesSupported = setOf(
                                 CredSignAlgValues.Named("EdDSA"),
                                 CredSignAlgValues.Named("ES256"),
                                 CredSignAlgValues.Named("ES256K"),
                                 CredSignAlgValues.Named("RSA")
                             ),
-                            credentialDefinition = if (format != CredentialFormat.sd_jwt_vc && format != CredentialFormat.mso_mdoc) CredentialDefinition(
+                            credentialDefinition = if (!isSdJwt && format != CredentialFormat.mso_mdoc) CredentialDefinition(
                                 type = type
                             ) else null,
-                            vct = if (format == CredentialFormat.sd_jwt_vc) baseUrl.plus("/${entry.key}") else null,
+                            vct = if (isSdJwt) baseUrl.plus("/${entry.key}") else null,
                         )
                     }.entries
                 }

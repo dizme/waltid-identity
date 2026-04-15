@@ -26,6 +26,8 @@ import kotlinx.serialization.decodeFromByteArray
 import kotlinx.serialization.encodeToHexString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -194,8 +196,12 @@ object Verifier2VPDirectPostHandler {
             failSessionCallback = failSessionCallback
         )
 
-        call.respond(
-            result
+        val jsonBody = buildJsonObject {
+            result.forEach { (k, v) -> put(k, JsonPrimitive(v)) }
+        }
+        call.respondText(
+            Json.encodeToString(JsonObject.serializer(), jsonBody),
+            ContentType.Application.Json
         )
     }
 

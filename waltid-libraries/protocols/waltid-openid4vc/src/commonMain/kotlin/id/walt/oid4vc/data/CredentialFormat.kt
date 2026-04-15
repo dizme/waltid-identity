@@ -26,6 +26,7 @@ enum class CredentialFormat(val value: String) {
             return when (value) {
                 // TODO: Workaround for Ktor's parseQueryString interpreting '+' as space
                 "vc+sd-jwt", "vc sd-jwt" -> sd_jwt_vc
+                "dc+sd-jwt", "dc sd-jwt" -> sd_jwt_dc
                 else -> entries.find { it.value == value }
             }
         }

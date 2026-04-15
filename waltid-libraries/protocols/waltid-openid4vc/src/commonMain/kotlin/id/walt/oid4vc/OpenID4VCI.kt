@@ -520,7 +520,12 @@ object OpenID4VCI {
                 issuer = baseUrl,
                 authorizationServers = setOf(baseUrl),
                 authorizationEndpoint = "$baseUrl/authorize",
+                pushedAuthorizationRequestEndpoint = "$baseUrl/par",
                 tokenEndpoint = "$baseUrl/token",
+                tokenEndpointAuthMethodsSupported = setOf("none"),
+                requirePushedAuthorizationRequests = true,
+                dpopSigningAlgValuesSupported = setOf("ES256"),
+                nonceEndpoint = "$baseUrl/nonce",
                 credentialEndpoint = "$baseUrl/credential",
                 batchCredentialEndpoint = "$baseUrl/batch_credential",
                 deferredCredentialEndpoint = "$baseUrl/credential_deferred",
@@ -699,7 +704,7 @@ object OpenID4VCI {
         val holderKey = when {
 
             JWTClaims.Header.jwk in proofHeader -> {
-                val holderJwk = requireNotNull(proofHeader[JWTClaims.Header.jwk])
+                val holderJwk = requireNotNull(proofHeader[JWTClaims.Header.jwk]).jsonObject
                 JWKKey.importJWK(holderJwk.toString()).getOrThrow()
             }
 

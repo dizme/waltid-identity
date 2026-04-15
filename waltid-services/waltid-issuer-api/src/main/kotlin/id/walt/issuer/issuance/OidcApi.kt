@@ -149,6 +149,21 @@ object OidcApi : CIProvider(), Klogging {
                 }
             }
 
+            post("{standardVersion}/nonce", {
+                request {
+                    standardVersionPathParameter()
+                }
+            }) {
+                val (nonce, expiresIn) = issueProofOfPossessionNonce()
+                call.response.header(HttpHeaders.CacheControl, "no-store")
+                call.respond(
+                    buildJsonObject {
+                        put("c_nonce", nonce)
+                        put("c_nonce_expires_in", expiresIn.inWholeSeconds)
+                    }
+                )
+            }
+
             get("{standardVersion}/jwks", getStandardVersionDocs()) {
                 call.respond(
                     status = HttpStatusCode.OK,

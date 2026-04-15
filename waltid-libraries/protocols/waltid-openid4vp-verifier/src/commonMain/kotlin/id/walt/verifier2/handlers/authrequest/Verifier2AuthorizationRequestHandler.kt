@@ -55,7 +55,11 @@ object Verifier2AuthorizationRequestHandler {
         )
 
         when (formattedSessionResponse) {
-            is JWTStringResponse -> call.respondText(formattedSessionResponse.jwt, ContentType.parse("application/oauth-authz-req+jwt"))
+            is JWTStringResponse -> call.respondBytes(
+                bytes = formattedSessionResponse.jwt.encodeToByteArray(),
+                contentType = ContentType("application", "oauth-authz-req+jwt"),
+                status = HttpStatusCode.OK
+            )
             is JsonObjectResponse -> call.respond(formattedSessionResponse.json)
             is RawAuthorizationRequestResponse -> call.respond(formattedSessionResponse.authorizationRequest)
         }

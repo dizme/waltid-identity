@@ -54,7 +54,7 @@ data class JsonObjectToCborMappingConfig(
         val claimsMap = mutableMapOf<MapKey, DataElement>()
         json.jsonObject.forEach { (key, value) ->
             claimsMap[MapKey(key)] = entriesConfigMap[key]?.executeMapping(value)
-                ?: value.toDataElement()
+                ?: value.toDataElement(key)
         }
         return MapElement(claimsMap)
     }
