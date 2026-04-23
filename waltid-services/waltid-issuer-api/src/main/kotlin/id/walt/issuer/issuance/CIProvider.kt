@@ -48,6 +48,7 @@ import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
+import io.ktor.server.application.ApplicationCall
 import io.ktor.server.plugins.*
 import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.DateTimeUnit
@@ -129,7 +130,7 @@ open class CIProvider(
 
     companion object {
         private val log = KotlinLogging.logger { }
-        private val http = HttpClient {
+        internal val issuanceHttpClient = HttpClient {
             install(ContentNegotiation) {
                 json()
             }
@@ -148,7 +149,7 @@ open class CIProvider(
             callbackUrl: String
         ) {
             try {
-                val response = http.post(callbackUrl.replace("\$id", sessionId)) {
+                val response = issuanceHttpClient.post(callbackUrl.replace("\$id", sessionId)) {
                     setBody(buildJsonObject {
                         put("id", sessionId)
                         put("type", type)
@@ -888,6 +889,20 @@ open class CIProvider(
         // Mark successful after deferred issuance is actually delivered
         updateSessionStatus(session, IssuanceSessionStatus.SUCCESSFUL, "Credential issued successfully", close = true)
         return@runBlocking response
+    }
+
+    /**
+     * If the wallet sends attestation headers (EUDI [AttestationBased]), verify JWTs against
+     * the Wallet Provider JWKS. If both headers are absent, the request is allowed (e.g. dev / `none`).
+     */
+    internal suspend fun verifyWalletClientAttestationHeaders(call: ApplicationCall) {
+        val cfg = ConfigManager.getConfig<OIDCIssuerServiceConfig>()
+        WalletClientAttestationVerifier.verifyIfPresent(
+            http = issuanceHttpClient,
+            walletProviderBaseUrl = cfg.walletProviderBaseUrl,
+            attestationJwt = call.request.headers[WalletClientAttestationVerifier.HEADER_CLIENT_ATTESTATION],
+            popJwt = call.request.headers[WalletClientAttestationVerifier.HEADER_CLIENT_ATTESTATION_POP],
+        )
     }
 
     fun processTokenRequest(tokenRequest: TokenRequest): TokenResponse = runBlocking {

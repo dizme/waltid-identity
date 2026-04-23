@@ -243,6 +243,11 @@ services:
         protocol: tcp
         mode: host
 
+      - target: "$ISSUER_API_TLS_PORT"
+        published: $ISSUER_API_TLS_PORT # issuer-api (HTTPS)
+        protocol: tcp
+        mode: host
+
       - target: "$VERIFIER_API_PORT"
         published: $VERIFIER_API_PORT # verifier-api
         protocol: tcp
@@ -280,6 +285,7 @@ services:
 
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./certs:/etc/caddy/certs:ro
 volumes:
   wallet-api-db:
   vault_data:

@@ -189,3 +189,9 @@ iOSInjectionProject/
 /waltid-openid4vc/root-ca-pub.pem
 /waltid-services/waltid-issuer-api/k8s/cert-device-potential.pem
 /waltid-services/waltid-issuer-api/k8s/ec_device_key.pem
+
+# docker-compose LAN: TLS mkcert + chiavi verifier dev (generati in locale, vedi docker-compose/certs/README.md)
+docker-compose/certs/tls.crt
+docker-compose/certs/tls.key
+docker-compose/verifier-api2/config/verifier.crt
+docker-compose/verifier-api2/config/verifier.key

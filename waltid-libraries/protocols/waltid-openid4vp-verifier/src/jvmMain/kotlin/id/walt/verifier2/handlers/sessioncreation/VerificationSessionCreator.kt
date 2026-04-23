@@ -124,32 +124,19 @@ object VerificationSessionCreator {
             val baseMetadata = clientMetadata ?: ClientMetadata()
             baseMetadata.copy(
                 jwks = jwks,
-                // Ensure vp_formats_supported includes mso_mdoc for HAIP
-                vpFormatsSupported = baseMetadata.vpFormatsSupported ?: mapOf(
-                    "mso_mdoc" to JsonObject(
-                        if (isDcApiHaip) mapOf(
-                            "issuerauth_alg_values" to JsonArray(listOf(Cose.Algorithm.ES256, -9, -50).map { it.toJsonElement() }),
-                            "deviceauth_alg_values" to JsonArray(listOf(Cose.Algorithm.ES256, -9, -50, -65537).map { it.toJsonElement() })
-                            /*"alg_values_supported" to JsonArray(
-                                listOf(JsonPrimitive("ES256"))
-                            )*/
-                        ) else emptyMap()
-                    )
+                vpFormatsSupported = mergeVpFormats(
+                    defaultVpFormatsSupported(msoMdocHaipAlgos = isDcApiHaip),
+                    baseMetadata.vpFormatsSupported,
                 ),
                 encryptedResponseEncValuesSupported = listOf("A128GCM")
             )
         } else {
             val baseMetadata = clientMetadata ?: ClientMetadata()
             baseMetadata.copy(
-                // Ensure vp_formats_supported includes mso_mdoc for HAIP
-                vpFormatsSupported = baseMetadata.vpFormatsSupported ?: mapOf(
-                    "mso_mdoc" to JsonObject(
-                        mapOf(
-                            "issuerauth_alg_values" to JsonArray(listOf(Cose.Algorithm.ES256, -9, -50).map { it.toJsonElement() }),
-                            "deviceauth_alg_values" to JsonArray(listOf(Cose.Algorithm.ES256, -9, -50, -65537).map { it.toJsonElement() })
-                        )
-                    )
-                )
+                vpFormatsSupported = mergeVpFormats(
+                    defaultVpFormatsSupported(msoMdocHaipAlgos = true),
+                    baseMetadata.vpFormatsSupported,
+                ),
             )
         }
 
@@ -432,5 +419,32 @@ object VerificationSessionCreator {
 
         return newSession
     }
+
+    /**
+     * Default `client_metadata.vp_formats_supported` so wallets can validate DCQL against advertised
+     * formats (EUDI requires every requested format to appear here). Includes SD-JWT VC (`dc+sd-jwt`)
+     * with HAIP-style algorithms and mdoc COSE algorithms when [msoMdocHaipAlgos] is true.
+     */
+    private fun defaultVpFormatsSupported(msoMdocHaipAlgos: Boolean): Map<String, JsonObject> =
+        mapOf(
+            "mso_mdoc" to JsonObject(
+                if (msoMdocHaipAlgos) mapOf(
+                    "issuerauth_alg_values" to JsonArray(listOf(Cose.Algorithm.ES256, -9, -50).map { it.toJsonElement() }),
+                    "deviceauth_alg_values" to JsonArray(listOf(Cose.Algorithm.ES256, -9, -50, -65537).map { it.toJsonElement() })
+                ) else emptyMap()
+            ),
+            "dc+sd-jwt" to JsonObject(
+                mapOf(
+                    "sd-jwt_alg_values" to JsonArray(listOf(JsonPrimitive("ES256"))),
+                    "kb-jwt_alg_values" to JsonArray(listOf(JsonPrimitive("ES256")))
+                )
+            )
+        )
+
+    private fun mergeVpFormats(
+        defaults: Map<String, JsonObject>,
+        override: Map<String, JsonObject>?,
+    ): Map<String, JsonObject> =
+        defaults + (override ?: emptyMap())
 
 }

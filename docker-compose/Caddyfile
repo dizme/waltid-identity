@@ -17,6 +17,17 @@
 	reverse_proxy http://issuer-api:{$ISSUER_API_PORT}
 }
 
+# Issuer API — stesso upstream, TLS per client esterni (wallet EUDI / OpenID4VCI).
+# Certificati: docker-compose/certs/tls.crt e tls.key (generare con mkcert, vedi certs/README.md).
+:{$ISSUER_API_TLS_PORT} {
+	tls /etc/caddy/certs/tls.crt /etc/caddy/certs/tls.key
+	@cred path_regexp credential ^/\.well-known/openid-credential-issuer/([^/]+)$
+	rewrite @cred /{http.regexp.credential.1}/.well-known/openid-credential-issuer
+	@auth path_regexp auth ^/\.well-known/oauth-authorization-server/([^/]+)$
+	rewrite @auth /{http.regexp.auth.1}/.well-known/oauth-authorization-server
+	reverse_proxy http://issuer-api:{$ISSUER_API_PORT}
+}
+
 # Verifier API
 :{$VERIFIER_API_PORT} {
     reverse_proxy http://verifier-api:{$VERIFIER_API_PORT}

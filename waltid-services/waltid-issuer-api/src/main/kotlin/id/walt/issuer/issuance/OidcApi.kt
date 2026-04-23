@@ -51,6 +51,67 @@ object OidcApi : CIProvider(), Klogging {
         }
     }
 
+    /**
+     * Workaround OpenID4VCI draft 13+ <-> waltid CredentialResponse mismatch.
+     *
+     * Waltid builds a legacy (draft 11/12) response: `{"format":"...","credential":"<str>",...}`.
+     * Modern wallets (eudi-lib-jvm-openid4vci-kt, draft 13+) expect instead
+     * `{"credentials":[{"credential":"<str>"}], "c_nonce":..., "c_nonce_expires_in":...}`.
+     *
+     * This helper maps the first representation to the second one so the existing waltid
+     * codepath keeps working and EUDI wallets can parse the response.
+     * Error responses, deferred responses (`transaction_id`) and already-draft13 responses
+     * (`credentials` array already present) are passed through unchanged.
+     */
+    private fun normalizeCredentialResponseForDraft13(body: JsonObject): JsonObject {
+        if (body.containsKey("credentials")) return body
+        if (body.containsKey("transaction_id")) return body
+        if (body.containsKey("error")) return body
+        val credential = body["credential"] ?: return body
+        val passthroughKeys = setOf("format", "credential", "credential_encoding", "acceptance_token")
+        val out = mutableMapOf<String, JsonElement>()
+        body.forEach { (k, v) -> if (k !in passthroughKeys) out[k] = v }
+        out["credentials"] = JsonArray(listOf(buildJsonObject { put("credential", credential) }))
+        return JsonObject(out)
+    }
+
+    /**
+     * Workaround OpenID4VCI draft 13 <-> waltid CredentialRequest mismatch.
+     *
+     * OpenID4VCI draft 13 removes `format` from the credential request body in favour of
+     * `credential_configuration_id` / `credential_identifier`. Waltid's legacy
+     * `id.walt.oid4vc.requests.CredentialRequest` still requires `format` (plus `doctype`,
+     * `vct`, `types`, `credential_definition` depending on the format).
+     *
+     * When a wallet (e.g. eudi-lib-jvm-openid4vci-kt) hits `POST /{ver}/credential` with a
+     * draft 13 body we rehydrate the missing legacy fields from `credentialConfigurationsSupported`
+     * in the issuer metadata before handing the JSON to the existing parser.
+     */
+    private fun enrichCredentialRequestBody(body: JsonObject): JsonObject {
+        if (body.containsKey("format")) return body
+        val credentialConfigurationId = body["credential_configuration_id"]?.jsonPrimitive?.contentOrNull
+            ?: body["credential_identifier"]?.jsonPrimitive?.contentOrNull
+            ?: return body
+        val supported = metadata.credentialConfigurationsSupported?.get(credentialConfigurationId)
+            ?: return body
+        val enriched = body.toMutableMap()
+        enriched["format"] = JsonPrimitive(supported.format.value)
+        supported.docType?.let { if ("doctype" !in enriched) enriched["doctype"] = JsonPrimitive(it) }
+        supported.vct?.let { if ("vct" !in enriched) enriched["vct"] = JsonPrimitive(it) }
+        supported.types?.let { types ->
+            if ("types" !in enriched) enriched["types"] = JsonArray(types.map { JsonPrimitive(it) })
+        }
+        supported.credentialDefinition?.let { def ->
+            if ("credential_definition" !in enriched) {
+                enriched["credential_definition"] = buildJsonObject {
+                    def.credentialSubject?.let { put("credentialSubject", it) }
+                    def.type?.let { put("type", JsonArray(it.map(::JsonPrimitive))) }
+                }
+            }
+        }
+        return JsonObject(enriched)
+    }
+
     fun Application.oidcApi() = oidcRoute {
         route("", {
             tags = listOf("oidc")
@@ -461,6 +522,22 @@ object OidcApi : CIProvider(), Klogging {
                     standardVersionPathParameter()
                 }
             }) {
+                try {
+                    runBlocking {
+                        verifyWalletClientAttestationHeaders(call)
+                    }
+                } catch (e: Exception) {
+                    logger.error(e) { "Wallet client attestation verification failed" }
+                    call.respond(
+                        status = HttpStatusCode.BadRequest,
+                        buildJsonObject {
+                            put("error", "invalid_client")
+                            put("error_description", e.message ?: "Invalid client attestation")
+                        }
+                    )
+                    return@post
+                }
+
                 val params = call.receiveParameters().toMap()
 
                 logger.debug { "/token params: $params" }
@@ -518,7 +595,9 @@ object OidcApi : CIProvider(), Klogging {
                         tokenKey = CI_TOKEN_KEY
                     )
 
-                    val credentialRequest = CredentialRequest.fromJSON(call.receive<JsonObject>())
+                    val credentialRequest = CredentialRequest.fromJSON(
+                        enrichCredentialRequestBody(call.receive<JsonObject>())
+                    )
 
                     val session = parsedToken[JWTClaims.Payload.subject]?.jsonPrimitive?.content?.let { getSession(it) }
                         ?: throw CredentialError(
@@ -528,10 +607,12 @@ object OidcApi : CIProvider(), Klogging {
                         )
 
                     call.respond(
-                        generateCredentialResponse(
-                            credentialRequest = credentialRequest,
-                            session = session,
-                        ).toJSON()
+                        normalizeCredentialResponseForDraft13(
+                            generateCredentialResponse(
+                                credentialRequest = credentialRequest,
+                                session = session,
+                            ).toJSON()
+                        )
                     )
                 } catch (exc: CredentialError) {
                     logger.error(exc) { "Credential error: " }

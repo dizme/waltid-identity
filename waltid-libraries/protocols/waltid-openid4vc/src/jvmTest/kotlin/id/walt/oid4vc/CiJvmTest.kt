@@ -683,6 +683,18 @@ class CiJvmTest {
         println("== Did doc ==")
         println(did.didDocument.toString())
     }
+
+    @Test
+    fun draft13DefaultProviderMetadataAdvertisesAttestationBasedClientAuth() {
+        val metadata = OpenID4VCI.createDefaultProviderMetadata(
+            baseUrl = "https://example.example/draft13",
+            version = OpenID4VCIVersion.DRAFT13,
+        )
+        val json = metadata.toJSON().toString()
+        assertTrue(actual = json.contains("attest_jwt_client_auth"), message = json)
+        assertTrue(actual = json.contains("client_attestation_signing_alg_values_supported"), message = json)
+        assertTrue(actual = json.contains("client_attestation_pop_signing_alg_values_supported"), message = json)
+    }
 }
 
 fun testCredentialIssuanceIsolatedFunctionsAuthCodeFlowRedirectWithCode(

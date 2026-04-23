@@ -515,6 +515,18 @@ object OpenID4VCI {
         customParameters: Map<String, JsonElement>? = emptyMap()
     ): OpenIDProviderMetadata {
 
+        val draft13Custom = buildMap<String, JsonElement> {
+            customParameters?.let { putAll(it) }
+            put(
+                "client_attestation_signing_alg_values_supported",
+                JsonArray(listOf(JsonPrimitive("ES256")))
+            )
+            put(
+                "client_attestation_pop_signing_alg_values_supported",
+                JsonArray(listOf(JsonPrimitive("ES256")))
+            )
+        }
+
         return when (version) {
             OpenID4VCIVersion.DRAFT13 -> OpenIDProviderMetadata.Draft13(
                 issuer = baseUrl,
@@ -522,7 +534,7 @@ object OpenID4VCI {
                 authorizationEndpoint = "$baseUrl/authorize",
                 pushedAuthorizationRequestEndpoint = "$baseUrl/par",
                 tokenEndpoint = "$baseUrl/token",
-                tokenEndpointAuthMethodsSupported = setOf("none"),
+                tokenEndpointAuthMethodsSupported = setOf("none", "attest_jwt_client_auth"),
                 requirePushedAuthorizationRequests = true,
                 dpopSigningAlgValuesSupported = setOf("ES256"),
                 nonceEndpoint = "$baseUrl/nonce",
@@ -542,7 +554,7 @@ object OpenID4VCI {
                 idTokenSigningAlgValuesSupported = setOf("ES256"), // (EBSI) https://openid.net/specs/openid-connect-self-issued-v2-1_0.html#name-self-issued-openid-provider-
                 codeChallengeMethodsSupported = listOf("S256"),
                 credentialConfigurationsSupported = credentialSupported,
-                customParameters = customParameters!!
+                customParameters = draft13Custom
             )
 
             OpenID4VCIVersion.DRAFT11 -> OpenIDProviderMetadata.Draft11.create(
