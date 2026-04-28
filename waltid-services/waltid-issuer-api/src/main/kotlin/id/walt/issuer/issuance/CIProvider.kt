@@ -3,8 +3,12 @@
 package id.walt.issuer.issuance
 
 import cbor.Cbor
+import id.walt.cose.CoseCertificate
+import id.walt.cose.CoseHeaders
+import id.walt.cose.CoseSign1 as WaltCoseSign1
+import id.walt.cose.toCoseAlgorithm
+import id.walt.cose.toCoseSigner
 import com.nimbusds.jose.jwk.ECKey
-import com.nimbusds.jose.jwk.JWK
 import com.nimbusds.jose.util.X509CertUtils
 import id.walt.commons.config.ConfigManager
 import id.walt.commons.persistence.ConfiguredPersistence
@@ -17,7 +21,7 @@ import id.walt.crypto.utils.UuidUtils.randomUUIDString
 import id.walt.issuer.config.CredentialTypeConfig
 import id.walt.issuer.config.OIDCIssuerServiceConfig
 import id.walt.mdoc.COSECryptoProviderKeyInfo
-import id.walt.mdoc.SimpleCOSECryptoProvider
+import id.walt.mdoc.cose.AsyncCOSECryptoProvider
 import id.walt.mdoc.cose.COSESign1
 import id.walt.mdoc.dataelement.DataElement
 import id.walt.mdoc.dataelement.json.toDataElement
@@ -89,6 +93,35 @@ open class CIProvider(
     private fun consumeIssuedProofNonce(nonce: String): Boolean {
         val exp = issuedProofNonces.remove(nonce) ?: return false
         return Clock.System.now() <= exp
+    }
+
+    /**
+     * COSE signer that works with both local and remote key backends via Key.signRaw().
+     */
+    private class RemoteCapableMDocCryptoProvider(
+        private val issuerKey: id.walt.crypto.keys.Key,
+        x5ChainPem: List<String>
+    ) : AsyncCOSECryptoProvider {
+        private val x5ChainDer = x5ChainPem.map { pem -> X509CertUtils.parse(pem).encoded }
+
+        @OptIn(ExperimentalSerializationApi::class)
+        override suspend fun sign1(payload: ByteArray, keyID: String?): COSESign1 {
+            val algorithm = issuerKey.keyType.toCoseAlgorithm()
+                ?: throw IllegalArgumentException("Unsupported mdoc signing key type: ${issuerKey.keyType}")
+
+            val protectedHeaders = CoseHeaders(algorithm = algorithm)
+            val unprotectedHeaders = CoseHeaders(
+                x5chain = x5ChainDer.map { CoseCertificate(it) }
+            )
+
+            val coseSign1 = WaltCoseSign1.createAndSign(
+                protectedHeaders = protectedHeaders,
+                unprotectedHeaders = unprotectedHeaders,
+                payload = payload,
+                signer = issuerKey.toCoseSigner(),
+            )
+            return Cbor.decodeFromByteArray(coseSign1.serialize())
+        }
     }
 
     private fun normalizeSerializedIssuerKey(issuerKey: JsonObject): JsonObject {
@@ -473,21 +506,11 @@ open class CIProvider(
 
         val resolvedIssuerKey = KeyManager.resolveSerializedKey(normalizeSerializedIssuerKey(request.issuerKey))
 
-        val issuerKey = JWK.parse(resolvedIssuerKey.exportJWK()).toECKey()
-
         val keyID = resolvedIssuerKey.getKeyId()
 
-        val cryptoProvider = SimpleCOSECryptoProvider(
-            listOf(
-                COSECryptoProviderKeyInfo(
-                    keyID = keyID,
-                    algorithmID = AlgorithmID.ECDSA_256,
-                    publicKey = issuerKey.toECPublicKey(),
-                    privateKey = issuerKey.toECPrivateKey(),
-                    x5Chain = request.x5Chain?.map { X509CertUtils.parse(it) } ?: listOf(),
-                    trustedRootCAs = request.trustedRootCAs?.map { X509CertUtils.parse(it) } ?: listOf()
-                )
-            )
+        val cryptoProvider = RemoteCapableMDocCryptoProvider(
+            issuerKey = resolvedIssuerKey,
+            x5ChainPem = request.x5Chain
         )
 
         val mdoc = MDocBuilder(
@@ -507,7 +530,7 @@ open class CIProvider(
                     )
                 }
             }
-        }.sign( // TODO: expiration date!
+        }.signAsync( // TODO: expiration date!
             validityInfo = ValidityInfo(
                 signed = Clock.System.now(),
                 validFrom = Clock.System.now(),

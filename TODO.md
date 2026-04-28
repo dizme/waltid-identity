@@ -1,0 +1,5 @@
+- [ ] Support mdoc issuance with remote issuer keys (AWS KMS `aws-rest-api`) in `waltid-issuer-api`.
+  - Current failure: `/draft13/credential` returns `500 NotImplementedError: JWK export is not available for remote keys.`
+  - Root cause: mdoc path in `CIProvider` uses `resolvedIssuerKey.exportJWK()` + `SimpleCOSECryptoProvider` requiring local `ECPrivateKey`.
+  - Temporary workaround: use local JWK issuer key for mdoc; keep remote keys for flows that use `signJws` (e.g. sd-jwt).
+  - Desired fix: introduce COSE signing path that uses remote `Key.signRaw`/`signJws` without exporting private key material.
