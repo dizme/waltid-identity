@@ -27,6 +27,7 @@ import id.walt.mdoc.dataelement.DataElement
 import id.walt.mdoc.dataelement.json.toDataElement
 import id.walt.mdoc.doc.MDocBuilder
 import id.walt.mdoc.mso.DeviceKeyInfo
+import id.walt.mdoc.mso.Status
 import id.walt.mdoc.mso.ValidityInfo
 import id.walt.oid4vc.OpenID4VC
 import id.walt.oid4vc.OpenID4VCI
@@ -400,6 +401,7 @@ open class CIProvider(
                             DisplayProperties.fromJSON(it.jsonObject)
                         },
                         x5Chain = x5c,
+                        sdJwtCredentialClaims = request.sdJwtCredentialClaims,
                     ).also {
                         if (!issuanceSession.callbackUrl.isNullOrEmpty())
                             sendCallback(
@@ -419,8 +421,8 @@ open class CIProvider(
                         selectiveDisclosure = request.selectiveDisclosure,
                         dataMapping = request.mapping,
                         x5Chain = x5c,
-                        display = credentialRequest.display
-
+                        display = credentialRequest.display,
+                        credentialStatus = request.credentialStatus,
                     ).also {
                         if (!issuanceSession.callbackUrl.isNullOrEmpty())
                             sendCallback(
@@ -513,6 +515,8 @@ open class CIProvider(
             x5ChainPem = request.x5Chain
         )
 
+        val mdocIssuerStatus: Status? = request.mdocStatus?.toMdocIssuerStatusOrNull()
+
         val mdoc = MDocBuilder(
             credentialRequest.docType
                 ?: throw CredentialError(
@@ -545,7 +549,8 @@ open class CIProvider(
                 )
             ),
             cryptoProvider = cryptoProvider,
-            keyID = keyID
+            keyID = keyID,
+            status = mdocIssuerStatus,
         ).also {
             if (!issuanceSession.callbackUrl.isNullOrEmpty())
                 sendCallback(

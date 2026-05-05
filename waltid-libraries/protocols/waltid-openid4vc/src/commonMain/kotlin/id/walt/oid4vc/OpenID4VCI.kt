@@ -705,6 +705,7 @@ object OpenID4VCI {
         x5Chain: List<String>? = null,
         display: List<DisplayProperties>? = null,
         sdJwtTypeHeader: String? = null,
+        sdJwtCredentialClaims: JsonObject? = null,
     ): String {
         val proofHeader = credentialRequest.proof?.jwt?.let { JwtUtils.parseJWTHeader(it) }
             ?: throw CredentialError(
@@ -738,8 +739,14 @@ object OpenID4VCI {
             if (!it.isNullOrEmpty() && DidUtils.isDidUrl(it)) it.substringBefore("#") else null
         }
 
+        val credentialPayload = sdJwtCredentialClaims?.let { extra ->
+            JsonObject(credentialData.toMutableMap().apply {
+                extra.forEach { (k, v) -> put(k, v) }
+            })
+        } ?: credentialData
+
         val sdPayload = SDPayload.createSDPayload(
-            fullPayload = credentialData.mergeSDJwtVCPayloadWithMapping(
+            fullPayload = credentialPayload.mergeSDJwtVCPayloadWithMapping(
                 mapping = dataMapping ?: JsonObject(emptyMap()),
                 context = mapOf(
                     "subjectDid" to holderDid,
@@ -826,7 +833,8 @@ object OpenID4VCI {
         selectiveDisclosure: SDMap? = null,
         dataMapping: JsonObject? = null,
         x5Chain: List<String>? = null,
-        display: List<DisplayProperties>? = null
+        display: List<DisplayProperties>? = null,
+        credentialStatus: JsonElement? = null,
     ): String {
         val proofHeader = credentialRequest.proof?.jwt?.let { JwtUtils.parseJWTHeader(it) }
             ?: throw CredentialError(
@@ -844,7 +852,11 @@ object OpenID4VCI {
             mapOf(JWTClaims.Header.x5c to JsonArray(it.map { cert -> cert.toJsonElement() }))
         } ?: mapOf()
 
-        return W3CVC(credentialData).let { vc ->
+        val vcPayload = credentialStatus?.let { status ->
+            JsonObject(credentialData.toMutableMap().apply { put("credentialStatus", status) })
+        } ?: credentialData
+
+        return W3CVC(vcPayload).let { vc ->
             val context = mapOf(
                 "subjectDid" to holderDid,
                 "issuerDid" to issuerId,
