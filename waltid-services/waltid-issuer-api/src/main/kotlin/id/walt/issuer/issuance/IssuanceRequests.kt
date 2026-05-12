@@ -92,6 +92,12 @@ data class IssuanceRequest(
     val x5Chain: List<String>? = null,
     val trustedRootCAs: List<String>? = null,
     var credentialFormat: CredentialFormat? = null,
+    /**
+     * mdoc passthrough (WT-907): caller-provided document type, used by
+     * `findMatchingIssuanceRequest` instead of `metadata.credentialConfigurationsSupported`
+     * registry lookup. credy emits this as the wire-level `docType` for `mso_mdoc` issuance.
+     */
+    val docType: String? = null,
     val standardVersion: OpenID4VCIVersion? = OpenID4VCIVersion.DRAFT13,
     val display: List<DisplayProperties>? = null,
     val draft11EncodeOfferedCredentialsByReference: Boolean? = true, //if set to false and only for standard version DRAFT11, offered credentials will be encoded by value, not by reference - required by EBSI Vector
