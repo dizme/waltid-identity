@@ -606,13 +606,16 @@ object OidcApi : CIProvider(), Klogging {
                             message = "Session not found for access token"
                         )
 
+                    // WT-907: walt.id wallet-api 0.19.0 reads top-level `credential`
+                    // (and crashes with NPE on the Draft 13 `credentials[]` array
+                    // emitted by normalizeCredentialResponseForDraft13). credy is
+                    // the wallet front and routes back through here, so we keep
+                    // the legacy shape until the wallet upgrade lands.
                     call.respond(
-                        normalizeCredentialResponseForDraft13(
-                            generateCredentialResponse(
-                                credentialRequest = credentialRequest,
-                                session = session,
-                            ).toJSON()
-                        )
+                        generateCredentialResponse(
+                            credentialRequest = credentialRequest,
+                            session = session,
+                        ).toJSON()
                     )
                 } catch (exc: CredentialError) {
                     logger.error(exc) { "Credential error: " }

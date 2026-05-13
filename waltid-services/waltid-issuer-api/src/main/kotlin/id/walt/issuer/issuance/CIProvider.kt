@@ -643,13 +643,24 @@ open class CIProvider(
         metadata.credentialConfigurationsSupported?.get(id)?.docType
 
     // Use format, type, vct and docType checks to filter matching entries
+    //
+    // WT-907 passthrough: for sd_jwt_vc / sd_jwt_dc / mso_mdoc, read format /
+    // vct / docType from the session's IssuanceRequest verbatim — no lookup
+    // against the built-in `credentialConfigurationsSupported` registry. The
+    // caller (credy) owns the CC registry and populates these fields when
+    // POSTing to `/openid4vc/{sdjwt,mdoc}/issue`. jwt_vc / jwt_vc_json keep
+    // the legacy registry-driven check.
     private fun findMatchingIssuanceRequest(
         credentialRequest: CredentialRequest,
         issuanceRequests: List<IssuanceRequest>
     ): IssuanceRequest? {
         return issuanceRequests.find { sessionData ->
             val credentialConfigurationId = sessionData.credentialConfigurationId
-            val credentialFormat = getFormatByCredentialConfigurationId(credentialConfigurationId)
+            val credentialFormat = when (credentialRequest.format) {
+                CredentialFormat.sd_jwt_vc, CredentialFormat.sd_jwt_dc, CredentialFormat.mso_mdoc ->
+                    sessionData.credentialFormat
+                else -> getFormatByCredentialConfigurationId(credentialConfigurationId)
+            }
             log.debug {
                 "Checking format - Request format: ${credentialRequest.format}, " +
                         "Session format: $credentialFormat"
@@ -666,8 +677,11 @@ open class CIProvider(
                     }
 
                     CredentialFormat.sd_jwt_vc, CredentialFormat.sd_jwt_dc -> {
-                        val vct = metadata.getVctByCredentialConfigurationId(credentialConfigurationId)
-                        vct == credentialRequest.vct
+                        sessionData.vct == credentialRequest.vct
+                    }
+
+                    CredentialFormat.mso_mdoc -> {
+                        sessionData.docType == credentialRequest.docType
                     }
 
                     else -> {
@@ -865,17 +879,26 @@ open class CIProvider(
                 )
             }
 
-            val validationResult = OpenID4VCI.validateCredentialRequest(
-                credentialRequest = credentialRequest,
-                nonce = nonceFromProof,
-                openIDProviderMetadata = metadata
-            )
-
-            if (!validationResult.success) throw CredentialError(
-                credentialRequest = credentialRequest,
-                errorCode = CredentialErrorCode.invalid_request,
-                message = validationResult.message
-            )
+            // WT-907 passthrough: validate proof against the session nonce, but
+            // check the requested format against the session's IssuanceRequests
+            // — not against the built-in `credentialConfigurationsSupported`
+            // registry. The caller (credy) owns the CC registry; this issuer
+            // only signs whatever was registered in the session.
+            if (!OpenID4VCI.validateProofOfPossession(credentialRequest, nonceFromProof)) {
+                throw CredentialError(
+                    credentialRequest = credentialRequest,
+                    errorCode = CredentialErrorCode.invalid_or_missing_proof,
+                    message = "Invalid proof of possession"
+                )
+            }
+            val sessionFormats = session.issuanceRequests.mapNotNull { it.credentialFormat }.toSet()
+            if (sessionFormats.isNotEmpty() && credentialRequest.format !in sessionFormats) {
+                throw CredentialError(
+                    credentialRequest = credentialRequest,
+                    errorCode = CredentialErrorCode.unsupported_credential_format,
+                    message = "Credential format ${credentialRequest.format} not in session formats $sessionFormats"
+                )
+            }
 
             // create credential result
             val credentialResult = generateCredential(

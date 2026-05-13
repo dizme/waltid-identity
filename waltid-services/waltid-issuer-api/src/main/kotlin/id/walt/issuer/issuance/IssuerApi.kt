@@ -12,6 +12,7 @@ import id.walt.issuer.issuance.openapi.issuerapi.MdocDocs.getMdocsDocs
 import id.walt.issuer.issuance.openapi.issuerapi.RawJwtDocs
 import id.walt.issuer.issuance.openapi.issuerapi.SdJwtDocs.getSdJwtBatchDocs
 import id.walt.issuer.issuance.openapi.issuerapi.SdJwtDocs.getSdJwtDocs
+import id.walt.oid4vc.OpenID4VCIVersion
 import id.walt.oid4vc.data.CredentialFormat
 import id.walt.oid4vc.requests.CredentialOfferRequest
 import id.walt.w3c.issuance.Issuer.mergingJwtIssue
@@ -41,13 +42,16 @@ fun createCredentialOfferUri(
     expiresIn: Duration = 5.minutes,
     sessionTtl: Duration? = null,
 ): String {
+    // WT-907 passthrough: VCT comes from the request body verbatim — no lookup
+    // against the issuer's built-in `credentialConfigurationsSupported` registry.
+    // Callers (credy) own the CC registry and supply `vct` directly. sd-jwt
+    // formats require VCT; mdoc / jwt_vc keep their existing vct field semantics.
     val overwrittenIssuanceRequests = issuanceRequests.map {
         it.copy(
             credentialFormat = credentialFormat,
             vct = if (credentialFormat == CredentialFormat.sd_jwt_vc || credentialFormat == CredentialFormat.sd_jwt_dc)
-                OidcApi.metadata.getVctByCredentialConfigurationId(
-                    it.credentialConfigurationId
-                ) ?: throw IllegalArgumentException("VCT not found") else null
+                it.vct ?: throw IllegalArgumentException("vct required in request body for sd-jwt issuance")
+            else it.vct
         )
     }
 
@@ -148,10 +152,15 @@ fun Application.issuerApi() {
                 route("sdjwt") {
                     post("issue", getSdJwtDocs()) {
                         val sdJwtIssuanceRequest = call.receive<IssuanceRequest>()
+                        // WT-907 passthrough: format is implicit from the route — sd_jwt_dc
+                        // ("dc+sd-jwt") when the caller targets V1 (OID4VCI 1.0 published
+                        // ≈ Draft 15+), otherwise sd_jwt_vc ("vc+sd-jwt", Draft 13). No
+                        // lookup against the built-in CC registry.
+                        val format = if (sdJwtIssuanceRequest.standardVersion == OpenID4VCIVersion.V1)
+                            CredentialFormat.sd_jwt_dc else CredentialFormat.sd_jwt_vc
                         val offerUri = createCredentialOfferUri(
                             issuanceRequests = listOf(sdJwtIssuanceRequest),
-                            credentialFormat = getFormatByCredentialConfigurationId(sdJwtIssuanceRequest.credentialConfigurationId)
-                                ?: throw IllegalArgumentException(INVALID_CREDENTIAL_CONFIGURATION_ID),
+                            credentialFormat = format,
                             callbackUrl = getCallbackUriHeader(),
                             sessionTtl = getSessionTtl()
                         )
@@ -164,11 +173,12 @@ fun Application.issuerApi() {
 
                     post("issueBatch", getSdJwtBatchDocs()) {
                         val sdJwtIssuanceRequests = call.receive<List<IssuanceRequest>>()
+                        val format = if (sdJwtIssuanceRequests.first().standardVersion == OpenID4VCIVersion.V1)
+                            CredentialFormat.sd_jwt_dc else CredentialFormat.sd_jwt_vc
                         val offerUri =
                             createCredentialOfferUri(
                                 issuanceRequests = sdJwtIssuanceRequests,
-                                credentialFormat = getFormatByCredentialConfigurationId(sdJwtIssuanceRequests.first().credentialConfigurationId)
-                                    ?: throw IllegalArgumentException(INVALID_CREDENTIAL_CONFIGURATION_ID),
+                                credentialFormat = format,
                                 callbackUrl = getCallbackUriHeader(),
                                 sessionTtl = getSessionTtl()
                             )
@@ -185,10 +195,10 @@ fun Application.issuerApi() {
                 route("mdoc") {
                     post("issue", getMdocsDocs()) {
                         val mdocIssuanceRequest = call.receive<IssuanceRequest>()
+                        // WT-907 passthrough: format is mso_mdoc by route.
                         val offerUri = createCredentialOfferUri(
                             issuanceRequests = listOf(mdocIssuanceRequest),
-                            credentialFormat = getFormatByCredentialConfigurationId(mdocIssuanceRequest.credentialConfigurationId)
-                                ?: throw IllegalArgumentException(INVALID_CREDENTIAL_CONFIGURATION_ID),
+                            credentialFormat = CredentialFormat.mso_mdoc,
                             callbackUrl = getCallbackUriHeader(),
                             sessionTtl = getSessionTtl()
                         )
