@@ -9,7 +9,6 @@ import id.walt.sdjwt.SDPayload
 import id.walt.w3c.schemes.JwsSignatureScheme
 import id.walt.w3c.schemes.JwsSignatureScheme.JwsHeader
 import id.walt.w3c.schemes.JwsSignatureScheme.JwsOption
-import io.ktor.utils.io.core.*
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.descriptors.SerialDescriptor
@@ -47,6 +46,15 @@ data class W3CVC(
     fun toJson(): String = Json.encodeToString(content)
     fun toPrettyJson(): String = prettyJson.encodeToString(content)
 
+    fun isV2(): Boolean {
+        val context = get("@context") ?: return false
+        return when (context) {
+            is JsonArray -> context.any { it.jsonPrimitive.contentOrNull == "https://www.w3.org/ns/credentials/v2" }
+            is JsonPrimitive -> context.contentOrNull == "https://www.w3.org/ns/credentials/v2"
+            else -> false
+        }
+    }
+
     @JvmBlocking
     @JvmAsync
     @JsPromise
@@ -63,27 +71,37 @@ data class W3CVC(
         additionalJwtOptions: Map<String, JsonElement> = emptyMap()
     ): String {
         val kid = issuerKid ?: issuerKey.getKeyId()
+        val wrapInVc = !isV2()
         val payload = JwsSignatureScheme().toPayload(
             data = this.toJsonObject(),
             jwtOptions = mapOf(
                 JwsOption.ISSUER to JsonPrimitive(issuerId),
                 JwsOption.SUBJECT to JsonPrimitive(subjectDid),
                 *(additionalJwtOptions.entries.map { it.toPair() }.toTypedArray())
-            )
+            ),
+            wrapInVc = wrapInVc
         )
 
         val sdPayload = SDPayload.createSDPayload(
             payload,
-            SDMapBuilder(disclosureMap.decoyMode).addField(JwsOption.VC, sd = false, children = disclosureMap).build()
+            if (wrapInVc) {
+                SDMapBuilder(disclosureMap.decoyMode).addField(
+                    JwsOption.VC,
+                    sd = false,
+                    children = disclosureMap
+                ).build()
+            } else {
+                disclosureMap
+            }
         )
-        val signable = Json.encodeToString(sdPayload.undisclosedPayload).toByteArray()
+        val signable = Json.encodeToString(sdPayload.undisclosedPayload).encodeToByteArray()
 
+        val typHeader = if (isV2()) "vc+sd-jwt" else "JWT"
         val signed = issuerKey.signJws(
-            signable, additionalJwtHeaders.plus(
-                mapOf(
-                    JwsHeader.KEY_ID to kid.toJsonElement()
-                )
-            )
+            signable, mapOf(
+                JwsHeader.KEY_ID to kid.toJsonElement(),
+                "typ" to typHeader.toJsonElement()
+            ).plus(additionalJwtHeaders)
         )
         return SDJwt.createFromSignedJwt(
             signedJwt = signed,
@@ -106,19 +124,22 @@ data class W3CVC(
         additionalJwtOptions: Map<String, JsonElement> = emptyMap()
     ): String {
         val kid = issuerKid ?: issuerKey.getKeyId()
+        val typHeader = if (isV2()) "vc+jwt" else "JWT"
+        val baseHeaders = mapOf(
+            JwsHeader.KEY_ID to kid.toJsonElement(),
+            "typ" to typHeader.toJsonElement(),
+        )
 
         return JwsSignatureScheme().sign(
             data = this.toJsonObject(),
             key = issuerKey,
-            jwtHeaders = mapOf(
-                JwsHeader.KEY_ID to kid.toJsonElement(),
-                *(additionalJwtHeader.entries.map { it.toPair() }.toTypedArray())
-            ),
+            jwtHeaders = baseHeaders + additionalJwtHeader,
             jwtOptions = mapOf(
                 JwsOption.ISSUER to JsonPrimitive(issuerId),
                 JwsOption.SUBJECT to JsonPrimitive(subjectDid),
                 *(additionalJwtOptions.entries.map { it.toPair() }.toTypedArray())
             ),
+            wrapInVc = !isV2()
         )
     }
 

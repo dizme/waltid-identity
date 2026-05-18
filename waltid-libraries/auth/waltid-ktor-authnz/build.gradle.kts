@@ -22,7 +22,7 @@ dependencies {
         exclude("org.apache.mina:mina-core") // Manually updated due to security CVE
         exclude("org.apache.commons:commons-lang3") // Manually updated due to security CVE
     }
-    implementation("org.apache.mina:mina-core:2.2.5")
+    implementation("org.apache.mina:mina-core:2.2.6")
     implementation("org.apache.commons:commons-lang3:3.20.0")
 
     // TOTP/HOTP
@@ -61,7 +61,7 @@ dependencies {
 
     // Ktor client
     implementation(identityLibs.ktor.client.core)
-    implementation(identityLibs.ktor.client.apache)
+    implementation(identityLibs.ktor.client.apache5)
     implementation(identityLibs.ktor.client.content.negotiation)
 
     // Ktor shared
