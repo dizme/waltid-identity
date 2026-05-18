@@ -896,7 +896,18 @@ open class CIProvider(
                 )
             }
             val sessionFormats = session.issuanceRequests.mapNotNull { it.credentialFormat }.toSet()
-            if (sessionFormats.isNotEmpty() && credentialRequest.format !in sessionFormats) {
+            // SD-JWT VC Draft 09+ rinominato `vc+sd-jwt` -> `dc+sd-jwt`: i
+            // due wire string mappano a CredentialFormat enum diversi
+            // (sd_jwt_vc / sd_jwt_dc) ma sono semanticamente la stessa
+            // famiglia. Trattali come compatibili a session-validation time
+            // così caller (es. credy) che registrano la session via
+            // /openid4vc/sdjwt/issue + standardVersion=DRAFT13 (-> sd_jwt_vc)
+            // possono comunque accettare credential request del wallet che
+            // segue Draft 09+ e manda `format: dc+sd-jwt`.
+            val sdJwtFamily = setOf(CredentialFormat.sd_jwt_vc, CredentialFormat.sd_jwt_dc)
+            val formatMatches = credentialRequest.format in sessionFormats
+                || (credentialRequest.format in sdJwtFamily && sessionFormats.any { it in sdJwtFamily })
+            if (sessionFormats.isNotEmpty() && !formatMatches) {
                 throw CredentialError(
                     credentialRequest = credentialRequest,
                     errorCode = CredentialErrorCode.unsupported_credential_format,
