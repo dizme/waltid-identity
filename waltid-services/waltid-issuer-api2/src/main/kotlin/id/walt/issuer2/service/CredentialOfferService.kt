@@ -22,6 +22,9 @@ import id.walt.openid4vci.preauthorized.PreAuthorizedCodeIssuer
 import id.walt.sdjwt.SDMap
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.util.UUID
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
@@ -160,8 +163,12 @@ class CredentialOfferService(
         expiresInSeconds: Long,
         valueMode: CredentialOfferValueMode = CredentialOfferValueMode.BY_REFERENCE,
     ): CredentialOfferCreateResponse {
-        require(issuerKey.isNotEmpty()) { "issuerKey must not be empty" }
-        require(issuerKey["type"] != null) { "issuerKey must contain a key type" }
+        // 🚧 WT-907: credy passes a bare JWK ({kty,x,y,d}) without the walt.id
+        // serialized-key wrapper; wrap it as {type:jwk, jwk:...}. KMS/aws keys
+        // (which already carry "type") pass through. Mirrors the issuer-api v1 fork.
+        val resolvedIssuerKey = normalizeSerializedIssuerKey(issuerKey)
+        require(resolvedIssuerKey.isNotEmpty()) { "issuerKey must not be empty" }
+        require(resolvedIssuerKey["type"] != null) { "issuerKey must contain a key type" }
 
         val sessionId = UUID.randomUUID().toString()
         val expiresAt = expirationTimestamp(expiresInSeconds)
@@ -190,7 +197,7 @@ class CredentialOfferService(
             profileId = credentialConfigurationId,
             authenticationMethod = AuthenticationMethod.PRE_AUTHORIZED,
             credentialConfigurationId = credentialConfigurationId,
-            issuerKey = issuerKey,
+            issuerKey = resolvedIssuerKey,
             credentialData = credentialData,
             mapping = mapping,
             selectiveDisclosure = selectiveDisclosure,
@@ -231,6 +238,23 @@ class CredentialOfferService(
             event = IssuanceSessionEvent.resolved_credential_offer,
         )
         return credentialOffer
+    }
+
+    /**
+     * 🚧 WT-907: credy serializes the issuer key as a bare JWK ({kty,x,y,d}) without the
+     * walt.id serialized-key envelope. Wrap it as {type:"jwk", jwk:<key>} so
+     * KeyManager.resolveSerializedKey accepts it. Keys that already carry "type"
+     * (e.g. {type:"aws",...} KMS handles, or already-wrapped jwk) pass through unchanged.
+     */
+    private fun normalizeSerializedIssuerKey(issuerKey: JsonObject): JsonObject {
+        if (issuerKey["type"] != null) return issuerKey
+        if (issuerKey.containsKey("kty") || issuerKey.containsKey("x")) {
+            return buildJsonObject {
+                put("type", JsonPrimitive("jwk"))
+                put("jwk", issuerKey)
+            }
+        }
+        return issuerKey
     }
 
     private fun issuerBaseUrl(): String = config.baseUrl.trimEnd('/') + "/openid4vci"

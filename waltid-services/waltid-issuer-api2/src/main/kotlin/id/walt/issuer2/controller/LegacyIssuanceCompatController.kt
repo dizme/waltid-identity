@@ -82,7 +82,7 @@ class LegacyIssuanceCompatController(
                         credentialStatus = null, // sd-jwt status is embedded in credentialData by credy
                         notifications = statusCallbackNotifications(call),
                         expiresInSeconds = sessionTtlSeconds(call),
-                        valueMode = id.walt.openid4vci.offers.CredentialOfferValueMode.BY_VALUE,
+                        valueMode = id.walt.openid4vci.offers.CredentialOfferValueMode.BY_REFERENCE,
                     )
                     call.respondText(response.credentialOffer, ContentType.Text.Plain)
                 }
@@ -115,7 +115,7 @@ class LegacyIssuanceCompatController(
                         credentialStatus = request.validityInfoStatus?.let { normalizeMdocStatus(it) },
                         notifications = statusCallbackNotifications(call),
                         expiresInSeconds = sessionTtlSeconds(call),
-                        valueMode = id.walt.openid4vci.offers.CredentialOfferValueMode.BY_VALUE,
+                        valueMode = id.walt.openid4vci.offers.CredentialOfferValueMode.BY_REFERENCE,
                     )
                     call.respondText(response.credentialOffer, ContentType.Text.Plain)
                 }
