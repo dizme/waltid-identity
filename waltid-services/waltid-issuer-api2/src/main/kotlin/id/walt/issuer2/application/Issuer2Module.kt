@@ -6,6 +6,7 @@ import id.walt.issuer2.config.Issuer2MetadataConfig
 import id.walt.issuer2.config.Issuer2ProfilesConfig
 import id.walt.issuer2.config.Issuer2ServiceConfig
 import id.walt.issuer2.controller.Issuer2ManagementController
+import id.walt.issuer2.controller.LegacyIssuanceCompatController
 import id.walt.issuer2.controller.OpenId4VciController
 import id.walt.issuer2.notifications.IssuanceNotificationService
 import id.walt.issuer2.repository.ConfiguredIssuanceSessionRepository
@@ -75,6 +76,14 @@ class Issuer2Module(
         metadataService = metadataService,
         protocolService = protocolService,
         offerService = credentialOfferService,
+        walletProviderBaseUrl = serviceConfig.walletProviderBaseUrl,
+    )
+
+    // 🚧 WT-907 PASSTHROUGH (out-of-spec, compat with wallet-wltbe-credy) — remove once credy migrates
+    // to the profile-driven API. See LegacyIssuanceCompatController.
+    val legacyIssuanceCompatController = LegacyIssuanceCompatController(
+        offerService = credentialOfferService,
+        metadataService = metadataService,
     )
 
     companion object {

@@ -52,5 +52,7 @@ fun Application.issuer2Module(withPlugins: Boolean = true) {
     routing {
         module.managementController.register(this)
         module.openId4VciController.register(this)
+        // 🚧 WT-907 PASSTHROUGH (out-of-spec, compat with wallet-wltbe-credy)
+        module.legacyIssuanceCompatController.register(this)
     }
 }

@@ -46,10 +46,34 @@ class MetadataService(
                 .withResolvedVct(configurationId)
         }
 
+    /**
+     * 🚧 WT-907 PASSTHROUGH (out-of-spec, compat with `wallet-wltbe-credy`) — see
+     * [id.walt.issuer2.controller.LegacyIssuanceCompatController].
+     *
+     * Credential configurations registered at runtime by the legacy compat issuance endpoints, so
+     * the caller-supplied (format/vct/docType) credential appears in
+     * `credential_configurations_supported` for wallet discovery. Best-effort and in-memory: the
+     * persisted [IssuanceSession.inlineCredentialConfiguration] is the source of truth at issuance.
+     * Bounded by the set of distinct credy credential types (stable ids like `<base>_sd_jwt_vc`).
+     */
+    private val dynamicCredentialConfigurations =
+        java.util.concurrent.ConcurrentHashMap<String, CredentialConfiguration>()
+
+    fun registerDynamicConfiguration(
+        credentialConfigurationId: String,
+        configuration: CredentialConfiguration,
+    ) {
+        dynamicCredentialConfigurations[credentialConfigurationId] = configuration
+    }
+
+    private fun allCredentialConfigurations(): Map<String, CredentialConfiguration> =
+        if (dynamicCredentialConfigurations.isEmpty()) credentialConfigurations
+        else credentialConfigurations + dynamicCredentialConfigurations
+
     fun getCredentialIssuerMetadata(): CredentialIssuerMetadata =
         CredentialIssuerMetadata.fromBaseUrl(
             baseUrl = baseUrl,
-            credentialConfigurationsSupported = credentialConfigurations,
+            credentialConfigurationsSupported = allCredentialConfigurations(),
             display = issuerDisplay,
         )
 
@@ -68,6 +92,7 @@ class MetadataService(
 
     fun getCredentialConfiguration(credentialConfigurationId: String): CredentialConfiguration? =
         credentialConfigurations[credentialConfigurationId]
+            ?: dynamicCredentialConfigurations[credentialConfigurationId]
 
     fun credentialConfigurationIdsForScopes(scopes: Set<String>): Set<String> =
         credentialConfigurations

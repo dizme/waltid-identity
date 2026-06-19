@@ -1,12 +1,15 @@
 package id.walt.issuer2.controller
 
 import id.walt.issuer2.controller.openapi.OpenId4VciRoutesDocs
+import id.walt.issuer2.security.WalletClientAttestationVerifier
 import id.walt.issuer2.service.CredentialOfferService
 import id.walt.issuer2.service.openid4vci.MetadataService
 import id.walt.issuer2.service.openid4vci.OpenId4VciProtocolService
+import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.smiley4.ktoropenapi.get
 import io.github.smiley4.ktoropenapi.post
 import io.github.smiley4.ktoropenapi.route
+import io.ktor.client.HttpClient
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.createRouteScopedPlugin
@@ -27,7 +30,13 @@ class OpenId4VciController(
     private val metadataService: MetadataService,
     private val protocolService: OpenId4VciProtocolService,
     private val offerService: CredentialOfferService,
+    private val walletProviderBaseUrl: String,
 ) {
+    private val log = KotlinLogging.logger { }
+
+    // Shared client for wallet-provider JWKS discovery during attestation verification.
+    private val attestationHttpClient = HttpClient()
+
     fun register(route: Route) {
         route.get(".well-known/openid-credential-issuer/openid4vci", OpenId4VciRoutesDocs.credentialIssuerMetadata()) {
             call.respond(metadataService.getCredentialIssuerMetadata())
@@ -104,6 +113,28 @@ class OpenId4VciController(
             }
 
             post("token", OpenId4VciRoutesDocs.token()) {
+                // OID4VCI 1.0 App. E attestation-based client auth: verify the wallet attestation
+                // headers when present (issuer2 advertises attest_jwt_client_auth in its metadata).
+                // No-op when both headers are absent (e.g. dev / pre-authorized without attestation).
+                try {
+                    WalletClientAttestationVerifier.verifyIfPresent(
+                        http = attestationHttpClient,
+                        walletProviderBaseUrl = walletProviderBaseUrl,
+                        attestationJwt = call.request.headers[WalletClientAttestationVerifier.HEADER_CLIENT_ATTESTATION],
+                        popJwt = call.request.headers[WalletClientAttestationVerifier.HEADER_CLIENT_ATTESTATION_POP],
+                    )
+                } catch (e: Exception) {
+                    log.error(e) { "Wallet client attestation verification failed" }
+                    call.respond(
+                        HttpStatusCode.BadRequest,
+                        buildJsonObject {
+                            put("error", "invalid_client")
+                            put("error_description", e.message ?: "Invalid client attestation")
+                        },
+                    )
+                    return@post
+                }
+
                 val response = protocolService.processTokenRequest(call.receiveParameters().toMap())
                 call.respond(HttpStatusCode.fromValue(response.status), response.payload)
             }

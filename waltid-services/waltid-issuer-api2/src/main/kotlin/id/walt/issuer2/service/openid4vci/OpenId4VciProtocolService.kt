@@ -269,7 +269,11 @@ class OpenId4VciProtocolService(
             )
         }
 
-        val configuration = metadataService.getCredentialConfiguration(credentialConfigurationId)
+        // 🚧 WT-907 PASSTHROUGH (compat with wallet-wltbe-credy): an inline credential configuration
+        // persisted on the session takes precedence (caller-supplied format/vct/docType, restart-safe)
+        // over the declared metadata registry. Null for all normal profile-driven sessions.
+        val configuration = session.inlineCredentialConfiguration
+            ?: metadataService.getCredentialConfiguration(credentialConfigurationId)
             ?: return failCredentialRequest(
                 requestWithSession,
                 session,

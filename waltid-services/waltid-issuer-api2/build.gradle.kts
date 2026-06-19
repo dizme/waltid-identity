@@ -35,6 +35,9 @@ dependencies {
     implementation(identityLibs.ktor.client.java)
     implementation(identityLibs.ktor.client.logging)
 
+    // Wallet client attestation verification (OID4VCI 1.0 App. E) — ported from issuer-api v1 fork.
+    implementation(identityLibs.nimbus.jose.jwt)
+
     implementation(identityLibs.ktor.serialization.kotlinx.json)
     implementation(identityLibs.kotlinx.coroutines.core)
     implementation(identityLibs.kotlinx.datetime)
