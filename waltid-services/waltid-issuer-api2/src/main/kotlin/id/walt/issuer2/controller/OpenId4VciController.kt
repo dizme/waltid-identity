@@ -146,9 +146,14 @@ class OpenId4VciController(
             }
 
             post("credential", OpenId4VciRoutesDocs.credential()) {
-                val accessToken = call.request.headers[HttpHeaders.Authorization]
-                    ?.substringAfter("Bearer ")
-                    ?: throw IllegalArgumentException("No bearer access token found")
+                // Accept both "Bearer <token>" and "DPoP <token>". multipaz/EUDI always present
+                // DPoP-bound access tokens (they compute a DPoP alg unconditionally), so a
+                // Bearer-only `substringAfter("Bearer ")` would leave the "DPoP " prefix attached
+                // and decodeJws would fail. We extract the token after the auth scheme; the DPoP
+                // proof itself is not validated (the access token carries the authorization).
+                val authHeader = call.request.headers[HttpHeaders.Authorization]
+                    ?: throw IllegalArgumentException("No access token found")
+                val accessToken = authHeader.substringAfter(' ', authHeader).trim()
                 val request = call.receive<JsonObject>()
                 val response = protocolService.processCredentialRequest(accessToken, request)
                 call.respond(HttpStatusCode.fromValue(response.status), response.payload)

@@ -80,6 +80,15 @@ class MetadataService(
     fun getAuthorizationServerMetadata(): AuthorizationServerMetadata =
         AuthorizationServerMetadata.fromBaseUrl(
             baseUrl = baseUrl,
+            // EUDI/multipaz (org.multipaz ... AuthorizationConfiguration.get) parse the AS metadata
+            // strictly and REQUIRE these to be present, even for the pre-authorized_code flow:
+            //  - pushed_authorization_request_endpoint (string): never called in pre-auth, just advertised.
+            //  - code_challenge_methods_supported (array, must contain "S256").
+            // Also advertise "none" alongside attestation so multipaz uses no client auth for the
+            // pre-authorized flow (matches the v1 fork; avoids forcing client attestation).
+            pushedAuthorizationRequestEndpointPath = "/par",
+            codeChallengeMethodsSupported = listOf("S256"),
+            tokenEndpointAuthMethodsSupported = setOf("none", "attest_jwt_client_auth"),
         )
 
     fun getJwtVcIssuerMetadata(): JWTVCIssuerMetadata =
